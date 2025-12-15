@@ -1,0 +1,16 @@
+{
+  "name": "Zap News",
+  "short_name": "Zap News",
+  "description": "A social news platform powered by Nostr and Bitcoin Lightning. Share links, discuss ideas, and earn sats.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#f59e0b",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

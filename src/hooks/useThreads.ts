@@ -1,0 +1,175 @@
+import { useNostr } from '@nostrify/react';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { NostrEvent, NostrFilter } from '@nostrify/nostrify';
+
+export type SortType = 'hot' | 'recent' | 'top';
+
+// Hot ranking algorithm inspired by Hacker News
+function getHotScore(event: NostrEvent, zapTotal: number): number {
+  const ageInHours = (Date.now() / 1000 - event.created_at) / 3600;
+  const gravity = 1.8;
+  // Use zap total (in sats) as the score, with a minimum of 1
+  const points = Math.max(1, zapTotal / 1000); // Convert millisats-like to sats
+  return points / Math.pow(ageInHours + 2, gravity);
+}
+
+export function useThreads(sort: SortType = 'hot') {
+  const { nostr } = useNostr();
+
+  return useInfiniteQuery({
+    queryKey: ['threads', sort],
+    queryFn: async ({ pageParam, signal }) => {
+      const filter: NostrFilter = { kinds: [11], limit: 30 };
+      
+      if (pageParam) {
+        filter.until = pageParam;
+      }
+
+      const events = await nostr.query([filter], {
+        signal: AbortSignal.any([signal, AbortSignal.timeout(5000)])
+      });
+
+      return events;
+    },
+    getNextPageParam: (lastPage) => {
+      if (lastPage.length === 0) return undefined;
+      return lastPage[lastPage.length - 1].created_at - 1;
+    },
+    initialPageParam: undefined as number | undefined,
+  });
+}
+
+export function useThread(eventId: string | undefined) {
+  const { nostr } = useNostr();
+
+  return useQuery({
+    queryKey: ['thread', eventId],
+    queryFn: async (c) => {
+      if (!eventId) return null;
+
+      const signal = AbortSignal.any([c.signal, AbortSignal.timeout(5000)]);
+      const events = await nostr.query([{ ids: [eventId], kinds: [11] }], { signal });
+      
+      return events[0] || null;
+    },
+    enabled: !!eventId,
+  });
+}
+
+export function useThreadZaps(eventIds: string[]) {
+  const { nostr } = useNostr();
+
+  return useQuery({
+    queryKey: ['thread-zaps', eventIds],
+    queryFn: async (c) => {
+      if (eventIds.length === 0) return new Map<string, number>();
+
+      const signal = AbortSignal.any([c.signal, AbortSignal.timeout(5000)]);
+      
+      // Query zap receipts for all events at once
+      const zapEvents = await nostr.query([{
+        kinds: [9735],
+        '#e': eventIds,
+      }], { signal });
+
+      // Build a map of event ID to total sats
+      const zapTotals = new Map<string, number>();
+      
+      for (const zap of zapEvents) {
+        const eTag = zap.tags.find(([name]) => name === 'e')?.[1];
+        if (!eTag) continue;
+
+        let sats = 0;
+        
+        // Try to extract amount from bolt11
+        const bolt11 = zap.tags.find(([name]) => name === 'bolt11')?.[1];
+        if (bolt11) {
+          try {
+            const { nip57 } = await import('nostr-tools');
+            sats = nip57.getSatoshisAmountFromBolt11(bolt11);
+          } catch {
+            // Try amount tag as fallback
+            const amountTag = zap.tags.find(([name]) => name === 'amount')?.[1];
+            if (amountTag) {
+              sats = Math.floor(parseInt(amountTag) / 1000);
+            }
+          }
+        } else {
+          // Try amount tag
+          const amountTag = zap.tags.find(([name]) => name === 'amount')?.[1];
+          if (amountTag) {
+            sats = Math.floor(parseInt(amountTag) / 1000);
+          }
+        }
+
+        const current = zapTotals.get(eTag) || 0;
+        zapTotals.set(eTag, current + sats);
+      }
+
+      return zapTotals;
+    },
+    enabled: eventIds.length > 0,
+    staleTime: 30000,
+  });
+}
+
+export function useThreadCommentCounts(eventIds: string[]) {
+  const { nostr } = useNostr();
+
+  return useQuery({
+    queryKey: ['thread-comment-counts', eventIds],
+    queryFn: async (c) => {
+      if (eventIds.length === 0) return new Map<string, number>();
+
+      const signal = AbortSignal.any([c.signal, AbortSignal.timeout(5000)]);
+      
+      // Query NIP-22 comments for all events at once
+      const comments = await nostr.query([{
+        kinds: [1111],
+        '#E': eventIds,
+      }], { signal });
+
+      // Build a map of event ID to comment count
+      const commentCounts = new Map<string, number>();
+      
+      for (const comment of comments) {
+        const eTag = comment.tags.find(([name]) => name === 'E')?.[1];
+        if (!eTag) continue;
+
+        const current = commentCounts.get(eTag) || 0;
+        commentCounts.set(eTag, current + 1);
+      }
+
+      return commentCounts;
+    },
+    enabled: eventIds.length > 0,
+    staleTime: 30000,
+  });
+}
+
+export function sortThreads(
+  threads: NostrEvent[],
+  sort: SortType,
+  zapTotals: Map<string, number>
+): NostrEvent[] {
+  const sorted = [...threads];
+  
+  switch (sort) {
+    case 'hot':
+      return sorted.sort((a, b) => {
+        const scoreA = getHotScore(a, zapTotals.get(a.id) || 0);
+        const scoreB = getHotScore(b, zapTotals.get(b.id) || 0);
+        return scoreB - scoreA;
+      });
+    case 'recent':
+      return sorted.sort((a, b) => b.created_at - a.created_at);
+    case 'top':
+      return sorted.sort((a, b) => {
+        const satsA = zapTotals.get(a.id) || 0;
+        const satsB = zapTotals.get(b.id) || 0;
+        return satsB - satsA;
+      });
+    default:
+      return sorted;
+  }
+}
