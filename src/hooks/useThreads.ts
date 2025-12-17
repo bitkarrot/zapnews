@@ -1,6 +1,6 @@
 import { useNostr } from '@nostrify/react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { NostrEvent, NostrFilter } from '@nostrify/nostrify';
+import { NostrEvent, NostrFilter, NostrMetadata } from '@nostrify/nostrify';
 
 export type SortType = 'hot' | 'recent' | 'top';
 
@@ -19,8 +19,8 @@ export function useThreads(sort: SortType = 'hot') {
   return useInfiniteQuery({
     queryKey: ['threads', sort],
     queryFn: async ({ pageParam, signal }) => {
-      const filter: NostrFilter = { kinds: [11], limit: 30 };
-      
+      const filter: NostrFilter = { kinds: [11], limit: 50 }; // Fetch more to account for filtering
+
       if (pageParam) {
         filter.until = pageParam;
       }
@@ -39,6 +39,54 @@ export function useThreads(sort: SortType = 'hot') {
   });
 }
 
+// Hook to check if authors are zappable (have lud16 or lud06)
+export function useZappableAuthors(pubkeys: string[]) {
+  const { nostr } = useNostr();
+
+  return useQuery({
+    queryKey: ['zappable-authors', pubkeys.sort().join(',')],
+    queryFn: async (c) => {
+      if (pubkeys.length === 0) return new Set<string>();
+
+      const signal = AbortSignal.any([c.signal, AbortSignal.timeout(5000)]);
+
+      // Fetch kind 0 metadata for all authors
+      const metadataEvents = await nostr.query([{
+        kinds: [0],
+        authors: pubkeys,
+      }], { signal });
+
+      // Build a set of zappable pubkeys
+      const zappablePubkeys = new Set<string>();
+
+      // Group by pubkey and get the latest metadata
+      const latestMetadata = new Map<string, NostrEvent>();
+      for (const event of metadataEvents) {
+        const existing = latestMetadata.get(event.pubkey);
+        if (!existing || event.created_at > existing.created_at) {
+          latestMetadata.set(event.pubkey, event);
+        }
+      }
+
+      // Check each author for lightning address
+      for (const [pubkey, event] of latestMetadata) {
+        try {
+          const metadata: NostrMetadata = JSON.parse(event.content);
+          if (metadata.lud16 || metadata.lud06) {
+            zappablePubkeys.add(pubkey);
+          }
+        } catch {
+          // Invalid metadata, skip
+        }
+      }
+
+      return zappablePubkeys;
+    },
+    enabled: pubkeys.length > 0,
+    staleTime: 60000, // Cache for 1 minute
+  });
+}
+
 export function useThread(eventId: string | undefined) {
   const { nostr } = useNostr();
 
@@ -49,7 +97,7 @@ export function useThread(eventId: string | undefined) {
 
       const signal = AbortSignal.any([c.signal, AbortSignal.timeout(5000)]);
       const events = await nostr.query([{ ids: [eventId], kinds: [11] }], { signal });
-      
+
       return events[0] || null;
     },
     enabled: !!eventId,
@@ -65,7 +113,7 @@ export function useThreadZaps(eventIds: string[]) {
       if (eventIds.length === 0) return new Map<string, number>();
 
       const signal = AbortSignal.any([c.signal, AbortSignal.timeout(5000)]);
-      
+
       // Query zap receipts for all events at once
       const zapEvents = await nostr.query([{
         kinds: [9735],
@@ -74,13 +122,13 @@ export function useThreadZaps(eventIds: string[]) {
 
       // Build a map of event ID to total sats
       const zapTotals = new Map<string, number>();
-      
+
       for (const zap of zapEvents) {
         const eTag = zap.tags.find(([name]) => name === 'e')?.[1];
         if (!eTag) continue;
 
         let sats = 0;
-        
+
         // Try to extract amount from bolt11
         const bolt11 = zap.tags.find(([name]) => name === 'bolt11')?.[1];
         if (bolt11) {
@@ -122,7 +170,7 @@ export function useThreadCommentCounts(eventIds: string[]) {
       if (eventIds.length === 0) return new Map<string, number>();
 
       const signal = AbortSignal.any([c.signal, AbortSignal.timeout(5000)]);
-      
+
       // Query NIP-22 comments for all events at once
       const comments = await nostr.query([{
         kinds: [1111],
@@ -131,7 +179,7 @@ export function useThreadCommentCounts(eventIds: string[]) {
 
       // Build a map of event ID to comment count
       const commentCounts = new Map<string, number>();
-      
+
       for (const comment of comments) {
         const eTag = comment.tags.find(([name]) => name === 'E')?.[1];
         if (!eTag) continue;
@@ -153,7 +201,7 @@ export function sortThreads(
   zapTotals: Map<string, number>
 ): NostrEvent[] {
   const sorted = [...threads];
-  
+
   switch (sort) {
     case 'hot':
       return sorted.sort((a, b) => {

@@ -6,7 +6,7 @@ import { useEffect, useMemo } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Header } from '@/components/Header';
 import { ThreadItem, ThreadItemSkeleton } from '@/components/ThreadItem';
-import { useThreadZaps, useThreadCommentCounts } from '@/hooks/useThreads';
+import { useThreadZaps, useThreadCommentCounts, useZappableAuthors } from '@/hooks/useThreads';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ArrowLeft, Hash } from 'lucide-react';
@@ -18,10 +18,10 @@ export function TagPage() {
   const { ref, inView } = useInView();
 
   // Fetch threads with this tag
-  const { 
-    data, 
-    fetchNextPage, 
-    hasNextPage, 
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
     isFetchingNextPage,
     isLoading,
     error,
@@ -29,13 +29,13 @@ export function TagPage() {
     queryKey: ['tag-threads', tag],
     queryFn: async ({ pageParam, signal }) => {
       if (!tag) return [];
-      
-      const filter: NostrFilter = { 
-        kinds: [11], 
+
+      const filter: NostrFilter = {
+        kinds: [11],
         '#t': [tag.toLowerCase()],
-        limit: 30 
+        limit: 50 // Fetch more to account for filtering
       };
-      
+
       if (pageParam) {
         filter.until = pageParam;
       }
@@ -55,7 +55,7 @@ export function TagPage() {
   });
 
   // Flatten and dedupe threads
-  const threads = useMemo(() => {
+  const allThreads = useMemo(() => {
     const seen = new Set<string>();
     return data?.pages.flat().filter((event: NostrEvent) => {
       if (!event.id || seen.has(event.id)) return false;
@@ -63,6 +63,20 @@ export function TagPage() {
       return true;
     }) || [];
   }, [data?.pages]);
+
+  // Get unique author pubkeys
+  const authorPubkeys = useMemo(() => {
+    return [...new Set(allThreads.map(t => t.pubkey))];
+  }, [allThreads]);
+
+  // Check which authors are zappable
+  const { data: zappableAuthors, isLoading: authorsLoading } = useZappableAuthors(authorPubkeys);
+
+  // Filter to only zappable threads
+  const threads = useMemo(() => {
+    if (!zappableAuthors) return [];
+    return allThreads.filter(t => zappableAuthors.has(t.pubkey));
+  }, [allThreads, zappableAuthors]);
 
   // Get thread IDs for batch queries
   const threadIds = useMemo(() => threads.map(t => t.id), [threads]);
@@ -84,7 +98,7 @@ export function TagPage() {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      
+
       <main className="container max-w-4xl mx-auto py-4 px-4">
         {/* Back button */}
         <Link to="/">
@@ -118,7 +132,7 @@ export function TagPage() {
                 </p>
               </CardContent>
             </Card>
-          ) : isLoading ? (
+          ) : isLoading || authorsLoading ? (
             <div className="divide-y divide-border/50">
               {[...Array(10)].map((_, i) => (
                 <ThreadItemSkeleton key={i} />
@@ -141,7 +155,7 @@ export function TagPage() {
                   isLoading={zapsLoading || commentsLoading}
                 />
               ))}
-              
+
               {/* Load more sentinel */}
               {hasNextPage && (
                 <div ref={ref} className="py-4">

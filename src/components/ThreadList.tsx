@@ -2,7 +2,7 @@ import { useMemo, useEffect } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { NostrEvent } from '@nostrify/nostrify';
 import { ThreadItem, ThreadItemSkeleton } from './ThreadItem';
-import { useThreads, useThreadZaps, useThreadCommentCounts, sortThreads, SortType } from '@/hooks/useThreads';
+import { useThreads, useThreadZaps, useThreadCommentCounts, useZappableAuthors, sortThreads, SortType } from '@/hooks/useThreads';
 import { Card, CardContent } from '@/components/ui/card';
 import { Flame } from 'lucide-react';
 
@@ -23,7 +23,7 @@ export function ThreadList({ sort }: ThreadListProps) {
   const { ref, inView } = useInView();
 
   // Flatten and dedupe threads
-  const threads = useMemo(() => {
+  const allThreads = useMemo(() => {
     const seen = new Set<string>();
     return data?.pages.flat().filter((event: NostrEvent) => {
       if (!event.id || seen.has(event.id)) return false;
@@ -31,6 +31,20 @@ export function ThreadList({ sort }: ThreadListProps) {
       return true;
     }) || [];
   }, [data?.pages]);
+
+  // Get unique author pubkeys
+  const authorPubkeys = useMemo(() => {
+    return [...new Set(allThreads.map(t => t.pubkey))];
+  }, [allThreads]);
+
+  // Check which authors are zappable
+  const { data: zappableAuthors, isLoading: authorsLoading } = useZappableAuthors(authorPubkeys);
+
+  // Filter to only zappable threads
+  const threads = useMemo(() => {
+    if (!zappableAuthors) return [];
+    return allThreads.filter(t => zappableAuthors.has(t.pubkey));
+  }, [allThreads, zappableAuthors]);
 
   // Get all thread IDs for batch queries
   const threadIds = useMemo(() => threads.map(t => t.id), [threads]);
@@ -66,7 +80,7 @@ export function ThreadList({ sort }: ThreadListProps) {
     );
   }
 
-  if (isLoading) {
+  if (isLoading || authorsLoading) {
     return (
       <div className="divide-y divide-border/50">
         {[...Array(10)].map((_, i) => (
