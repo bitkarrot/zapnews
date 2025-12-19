@@ -19,17 +19,38 @@ export function useThreads(sort: SortType = 'hot') {
   return useInfiniteQuery({
     queryKey: ['threads', sort],
     queryFn: async ({ pageParam, signal }) => {
-      const filter: NostrFilter = { kinds: [11], limit: 50 }; // Fetch more to account for filtering
+      // Query for both kind 11 (threads with titles) and kind 1 (regular notes)
+      // Kind 11 is preferred but kind 1 gives us more content
+      const filter: NostrFilter = { kinds: [11, 1], limit: 50 };
 
       if (pageParam) {
         filter.until = pageParam;
       }
 
       const events = await nostr.query([filter], {
-        signal: AbortSignal.any([signal, AbortSignal.timeout(5000)])
+        signal: AbortSignal.any([signal, AbortSignal.timeout(8000)])
       });
 
-      return events;
+      // Filter out replies (events with 'e' tags that reference other events)
+      // We only want top-level posts
+      const topLevelPosts = events.filter(event => {
+        // Check if this is a reply to another event
+        const hasReplyTag = event.tags.some(([name, , , marker]) =>
+          name === 'e' && (marker === 'reply' || marker === 'root')
+        );
+        // Also check for simple 'e' tag without marker (older style replies)
+        const hasSimpleReplyTag = event.tags.some(([name]) => name === 'e');
+
+        // For kind 1, filter out replies
+        if (event.kind === 1) {
+          return !hasReplyTag && !hasSimpleReplyTag;
+        }
+
+        // For kind 11, include all (they're threads)
+        return true;
+      });
+
+      return topLevelPosts;
     },
     getNextPageParam: (lastPage) => {
       if (lastPage.length === 0) return undefined;
@@ -96,7 +117,8 @@ export function useThread(eventId: string | undefined) {
       if (!eventId) return null;
 
       const signal = AbortSignal.any([c.signal, AbortSignal.timeout(5000)]);
-      const events = await nostr.query([{ ids: [eventId], kinds: [11] }], { signal });
+      // Query for both kind 11 (threads) and kind 1 (notes)
+      const events = await nostr.query([{ ids: [eventId], kinds: [11, 1] }], { signal });
 
       return events[0] || null;
     },
@@ -171,17 +193,33 @@ export function useThreadCommentCounts(eventIds: string[]) {
 
       const signal = AbortSignal.any([c.signal, AbortSignal.timeout(5000)]);
 
-      // Query NIP-22 comments for all events at once
-      const comments = await nostr.query([{
-        kinds: [1111],
-        '#E': eventIds,
-      }], { signal });
+      // Query both NIP-22 comments (kind 1111) and regular replies (kind 1)
+      const [nip22Comments, regularReplies] = await Promise.all([
+        nostr.query([{
+          kinds: [1111],
+          '#E': eventIds,
+        }], { signal }),
+        nostr.query([{
+          kinds: [1],
+          '#e': eventIds,
+        }], { signal }),
+      ]);
 
       // Build a map of event ID to comment count
       const commentCounts = new Map<string, number>();
 
-      for (const comment of comments) {
+      // Count NIP-22 comments
+      for (const comment of nip22Comments) {
         const eTag = comment.tags.find(([name]) => name === 'E')?.[1];
+        if (!eTag) continue;
+
+        const current = commentCounts.get(eTag) || 0;
+        commentCounts.set(eTag, current + 1);
+      }
+
+      // Count regular replies
+      for (const reply of regularReplies) {
+        const eTag = reply.tags.find(([name]) => name === 'e')?.[1];
         if (!eTag) continue;
 
         const current = commentCounts.get(eTag) || 0;

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { NostrEvent, NostrFilter, NPool, NRelay1 } from '@nostrify/nostrify';
 import { NostrContext } from '@nostrify/react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -11,24 +11,28 @@ interface NostrProviderProps {
 const NostrProvider: React.FC<NostrProviderProps> = (props) => {
   const { children } = props;
   const { config } = useAppContext();
-
   const queryClient = useQueryClient();
 
-  // Create NPool instance only once
-  const pool = useRef<NPool | undefined>(undefined);
+  // Track relay URLs to detect changes
+  const relayUrlsKey = useMemo(() => {
+    return config.relayMetadata.relays
+      .filter(r => r.read)
+      .map(r => r.url)
+      .sort()
+      .join(',');
+  }, [config.relayMetadata.relays]);
 
-  // Use refs so the pool always has the latest data
+  // Use ref so the pool always has the latest relay metadata
   const relayMetadata = useRef(config.relayMetadata);
-
-  // Invalidate Nostr queries when relay metadata changes
+  
+  // Update ref when config changes
   useEffect(() => {
     relayMetadata.current = config.relayMetadata;
-    queryClient.invalidateQueries({ queryKey: ['nostr'] });
-  }, [config.relayMetadata, queryClient]);
+  }, [config.relayMetadata]);
 
-  // Initialize NPool only once
-  if (!pool.current) {
-    pool.current = new NPool({
+  // Create NPool - recreate when relays change
+  const pool = useMemo(() => {
+    return new NPool({
       open(url: string) {
         return new NRelay1(url);
       },
@@ -52,15 +56,23 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
           .filter(r => r.write)
           .map(r => r.url);
 
-        const allRelays = new Set<string>(writeRelays);
-
-        return [...allRelays];
+        return [...new Set(writeRelays)];
       },
     });
-  }
+  }, [relayUrlsKey]); // Recreate pool when relay URLs change
+
+  // Invalidate all queries when relays change
+  useEffect(() => {
+    // Invalidate all data queries to refetch from new relays
+    queryClient.invalidateQueries({ queryKey: ['threads'] });
+    queryClient.invalidateQueries({ queryKey: ['thread-zaps'] });
+    queryClient.invalidateQueries({ queryKey: ['thread-comment-counts'] });
+    queryClient.invalidateQueries({ queryKey: ['zappable-authors'] });
+    queryClient.invalidateQueries({ queryKey: ['nostr'] });
+  }, [relayUrlsKey, queryClient]);
 
   return (
-    <NostrContext.Provider value={{ nostr: pool.current }}>
+    <NostrContext.Provider value={{ nostr: pool }}>
       {children}
     </NostrContext.Provider>
   );
