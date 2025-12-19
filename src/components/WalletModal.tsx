@@ -309,6 +309,11 @@ export function WalletModal({ children, className, open: controlledOpen, onOpenC
     </Dialog>
   );
 
+  // When controlled and closed, render nothing
+  if (isControlled && !open) {
+    return null;
+  }
+
   if (isMobile) {
     return (
       <>
