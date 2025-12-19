@@ -267,6 +267,9 @@ export function WalletModal({ children, className, open: controlledOpen, onOpenC
     });
   };
 
+  // If controlled externally (open prop provided), don't render trigger
+  const isControlled = controlledOpen !== undefined;
+
   const walletContentProps = {
     webln,
     hasNWC,
@@ -305,9 +308,6 @@ export function WalletModal({ children, className, open: controlledOpen, onOpenC
       </DialogContent>
     </Dialog>
   );
-
-  // If controlled externally (open prop provided), don't render trigger
-  const isControlled = controlledOpen !== undefined;
 
   if (isMobile) {
     return (
