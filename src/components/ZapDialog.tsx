@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, forwardRef } from 'react';
-import { Zap, Copy, Check, ExternalLink, Sparkle, Sparkles, Star, Rocket, ArrowLeft, X, Wallet, Loader2 } from 'lucide-react';
+import { Zap, Copy, Check, ExternalLink, Sparkle, Sparkles, Star, Rocket, ArrowLeft, X, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
@@ -31,7 +31,7 @@ import { useToast } from '@/hooks/useToast';
 import { useZaps } from '@/hooks/useZaps';
 import { useWallet } from '@/hooks/useWallet';
 import { useIsMobile } from '@/hooks/useIsMobile';
-import { WalletModal } from '@/components/WalletModal';
+
 import type { Event } from 'nostr-tools';
 import QRCode from 'qrcode';
 
@@ -65,7 +65,6 @@ interface ZapContentProps {
   setAmount: (amount: number | string) => void;
   setComment: (comment: string) => void;
   inputRef: React.RefObject<HTMLInputElement>;
-  onConnectWallet: () => void;
 }
 
 // Moved ZapContent outside of ZapDialog to prevent re-renders causing focus loss
@@ -85,7 +84,6 @@ const ZapContent = forwardRef<HTMLDivElement, ZapContentProps>(({
   setAmount,
   setComment,
   inputRef,
-  onConnectWallet,
 }, ref) => (
   <div ref={ref}>
     {invoice ? (
@@ -98,43 +96,34 @@ const ZapContent = forwardRef<HTMLDivElement, ZapContentProps>(({
         <Separator className="my-4" />
 
         <div className="flex flex-col justify-center min-h-0 flex-1 px-2">
-          {/* Primary payment button */}
-          {hasWallet ? (
-            <Button
-              onClick={handlePayWithWallet}
-              disabled={isPaying}
-              className="w-full bg-amber-500 hover:bg-amber-600 text-white mb-4"
-              size="lg"
-            >
-              {isPaying ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Paying...
-                </>
-              ) : (
-                <>
-                  <Zap className="h-4 w-4 mr-2" />
-                  Pay with Connected Wallet
-                </>
-              )}
-            </Button>
-          ) : (
-            <Button
-              onClick={onConnectWallet}
-              variant="outline"
-              className="w-full mb-4"
-              size="lg"
-            >
-              <Wallet className="h-4 w-4 mr-2" />
-              Connect Wallet to Pay
-            </Button>
+          {/* Primary payment button - only show if wallet connected */}
+          {hasWallet && (
+            <>
+              <Button
+                onClick={handlePayWithWallet}
+                disabled={isPaying}
+                className="w-full bg-amber-500 hover:bg-amber-600 text-white mb-4"
+                size="lg"
+              >
+                {isPaying ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Paying...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="h-4 w-4 mr-2" />
+                    Pay with Wallet
+                  </>
+                )}
+              </Button>
+              <div className="flex items-center gap-2 my-2">
+                <div className="h-px flex-1 bg-muted" />
+                <span className="text-xs text-muted-foreground">OR SCAN QR</span>
+                <div className="h-px flex-1 bg-muted" />
+              </div>
+            </>
           )}
-
-          <div className="flex items-center gap-2 my-2">
-            <div className="h-px flex-1 bg-muted" />
-            <span className="text-xs text-muted-foreground">OR SCAN QR</span>
-            <div className="h-px flex-1 bg-muted" />
-          </div>
 
           {/* QR Code */}
           <div className="flex justify-center">
@@ -235,10 +224,10 @@ const ZapContent = forwardRef<HTMLDivElement, ZapContentProps>(({
           />
         </div>
         <div className="px-4 pb-4">
-          <Button 
-            onClick={handleZap} 
-            className="w-full bg-amber-500 hover:bg-amber-600 text-white" 
-            disabled={isZapping} 
+          <Button
+            onClick={handleZap}
+            className="w-full bg-amber-500 hover:bg-amber-600 text-white"
+            disabled={isZapping}
             size="default"
           >
             {isZapping ? (
@@ -262,7 +251,7 @@ ZapContent.displayName = 'ZapContent';
 
 export function ZapDialog({ target, children, className }: ZapDialogProps) {
   const [open, setOpen] = useState(false);
-  const [walletModalOpen, setWalletModalOpen] = useState(false);
+
   const [isPaying, setIsPaying] = useState(false);
   const { user } = useCurrentUser();
   const { data: author } = useAuthor(target.pubkey);
@@ -348,7 +337,7 @@ export function ZapDialog({ target, children, className }: ZapDialogProps) {
 
   const handlePayWithWallet = async () => {
     if (!invoice) return;
-    
+
     setIsPaying(true);
     try {
       if (webln) {
@@ -368,7 +357,7 @@ export function ZapDialog({ target, children, className }: ZapDialogProps) {
           console.log('WebLN payment failed, trying NWC...', e);
         }
       }
-      
+
       // Fall back to zap function which handles NWC
       const finalAmount = typeof amount === 'string' ? parseInt(amount, 10) : amount;
       zap(finalAmount, comment);
@@ -404,9 +393,7 @@ export function ZapDialog({ target, children, className }: ZapDialogProps) {
     zap(finalAmount, comment);
   };
 
-  const handleConnectWallet = () => {
-    setWalletModalOpen(true);
-  };
+
 
   const contentProps = {
     invoice,
@@ -424,7 +411,7 @@ export function ZapDialog({ target, children, className }: ZapDialogProps) {
     setAmount,
     setComment,
     inputRef,
-    onConnectWallet: handleConnectWallet,
+
   };
 
   if (!user || user.pubkey === target.pubkey || (!author?.metadata?.lud06 && !author?.metadata?.lud16)) {
@@ -484,7 +471,7 @@ export function ZapDialog({ target, children, className }: ZapDialogProps) {
             </div>
           </DrawerContent>
         </Drawer>
-        <WalletModal open={walletModalOpen} onOpenChange={setWalletModalOpen} />
+
       </>
     );
   }
@@ -511,7 +498,7 @@ export function ZapDialog({ target, children, className }: ZapDialogProps) {
           </div>
         </DialogContent>
       </Dialog>
-      <WalletModal open={walletModalOpen} onOpenChange={setWalletModalOpen} />
+
     </>
   );
 }
