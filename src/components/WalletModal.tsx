@@ -34,6 +34,8 @@ import type { WebLNProvider } from "@webbtc/webln-types";
 interface WalletModalProps {
   children?: React.ReactNode;
   className?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 // Extracted AddWalletContent to prevent re-renders
@@ -204,8 +206,12 @@ const WalletContent = forwardRef<HTMLDivElement, {
 ));
 WalletContent.displayName = 'WalletContent';
 
-export function WalletModal({ children, className }: WalletModalProps) {
-  const [open, setOpen] = useState(false);
+export function WalletModal({ children, className, open: controlledOpen, onOpenChange }: WalletModalProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+
+  // Support both controlled and uncontrolled usage
+  const open = controlledOpen !== undefined ? controlledOpen : uncontrolledOpen;
+  const setOpen = onOpenChange || setUncontrolledOpen;
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [connectionUri, setConnectionUri] = useState('');
   const [alias, setAlias] = useState('');
