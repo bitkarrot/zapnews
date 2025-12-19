@@ -106,16 +106,18 @@ export function Header() {
           </nav>
 
           {/* Actions */}
-          <div className="flex items-center gap-1 sm:gap-2">
-            {/* Relay Picker */}
-            <RelayPicker />
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+            {/* Relay Picker - hide on mobile when logged out to save space */}
+            <div className={user ? "" : "hidden sm:block"}>
+              <RelayPicker />
+            </div>
 
             {/* Theme Toggle */}
             <Button
               variant="ghost"
               size="icon"
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className="h-9 w-9"
+              className="h-9 w-9 shrink-0"
             >
               {theme === 'dark' ? (
                 <Sun className="h-4 w-4" />
@@ -124,10 +126,10 @@ export function Header() {
               )}
             </Button>
 
-            {/* Create Post Button */}
+            {/* Create Post Button - only when logged in */}
             {user && (
               <CreatePostDialog>
-                <Button size="sm" className="bg-amber-500 hover:bg-amber-600 text-white">
+                <Button size="sm" className="bg-amber-500 hover:bg-amber-600 text-white shrink-0">
                   <Plus className="h-4 w-4 mr-1" />
                   <span className="hidden sm:inline">Post</span>
                 </Button>
@@ -135,7 +137,7 @@ export function Header() {
             )}
 
             {/* Login Area */}
-            <LoginArea className="max-w-40" />
+            <LoginArea className={user ? "" : "[&>div]:gap-1 [&_button]:px-2 sm:[&_button]:px-4 [&_button]:text-xs sm:[&_button]:text-sm"} />
 
             {/* Mobile Menu */}
             <DropdownMenu open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
